@@ -1,0 +1,98 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environment
+venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Executable builds
+*.exe
+*.app
+*.dmg
+*.pkg
+*.deb
+*.rpm
+build/
+dist/
+
+# Logs and databases
+*.log
+*.sql
+*.sqlite
+*.db
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Test files
+test/
+tests/
+*.test.py
+
+# Temporary files
+*.tmp
+*.temp
+*.cache
+
+# Configuration files (if they contain sensitive data)
+config.ini
+settings.json
+
+# Screenshots and recordings
+screenshots/
+recordings/
+*.png
+*.jpg
+*.gif
+*.mp4
+
+# Documentation builds
+docs/_build/
+
+# pyenv
+.python-version
+
+# pipenv
+Pipfile.lock
+
+# Poetry
+poetry.lock
+
+# Backup files
+*.bak
+*.backup
+*~
