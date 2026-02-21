@@ -16,11 +16,7 @@ import queue
 from file_transfer import FileTransferManager, FileTransferWindow
 from p2p_connector import P2PConnector
 
-import ctypes
-try:
-    ctypes.windll.shcore.SetProcessDpiAwareness(1)   # 1 = SYSTEM_AWARE
-except Exception:
-    pass
+
 
 try:
     import pynput
@@ -143,21 +139,21 @@ class AuthenticationManager:
             return True
         return self.password == test_password
 
-    def add_client(self, client_addr, con, screen_manager):
+    def add_client(self, client_addr, conn, screen_manager):
         """Track connected client"""
         with self.client_lock:
             if 0 < len(screen_manager.screen_to_addr):
-                # If windows is closed with x remove_client doesn´t get called so we have to double-check
+                # If windows is closed with x remove_client doesnÂ´t get called so we have to double-check
                 self._remove_from_addr_list(screen_manager, client_addr)
                 first_key = next(iter(screen_manager.screen_to_addr))  # Get first screen of the host
-                screen_manager.screen_to_addr[first_key].append(client_addr)
+                screen_manager.screen_to_addr[first_key].append((conn, client_addr))
 
             if socket:
                 header = struct.pack("!B", PACKET_SCREEN_INFO)
                 data = json.dumps(screen_manager.screens).encode()
                 packet = header + data
 
-                screen_manager.network_manager.send_with_length_all(con, packet)
+                screen_manager.network_manager.send_with_length_all(conn, packet)
 
             self.connected_clients.add(client_addr)
             return len(self.connected_clients)
@@ -170,9 +166,10 @@ class AuthenticationManager:
             self.connected_clients.discard(client_addr)
             return len(self.connected_clients)
 
-    def _remove_from_addr_list(self, screen_manager, client_addr):
-        for addr_list in screen_manager.screen_to_addr.values():
-            addr_list[:] = [addr for addr in addr_list if addr[0] != client_addr[0]]
+    @staticmethod
+    def _remove_from_addr_list(screen_manager, client_addr):
+        for clients in screen_manager.screen_to_addr.values():
+            clients[:] = [client for client in clients if client[1][0] != client_addr[0]]
 
     def get_client_count(self):
         """Get current client count"""
@@ -321,6 +318,7 @@ class ScreenManager:
     def __init__(self, network_manager: NetworkManager):
         self.network_manager = network_manager
         self.running = False
+        self.started_loop = False
         self.quality = SCREEN_QUALITY
         self.fps = SCREEN_FPS
         self.frame_time = 1.0 / self.fps
@@ -335,48 +333,11 @@ class ScreenManager:
 
         # Start listener thread for screen change commands from client
         self.network_manager.executor.submit(self._listen_for_screen_commands, conn, client_addr)
-        try:
-            breaking_var = False  # Used to exiting the while loop
-            with mss.mss() as sct:
-                last_frame_time = time.time()
 
-                while self.running:
-                    current_time = time.time()
-                    elapsed = current_time - last_frame_time
+        if not self.started_loop:
+            self.network_manager.executor.submit(self._screen_loop, status_callback)
+        return
 
-                    if elapsed < self.frame_time:
-                        time.sleep(self.frame_time - elapsed)
-                        continue
-
-                    last_frame_time = current_time
-
-                    for screen, addr_list in self.screen_to_addr.items():
-                        if len(addr_list) <= 0:
-                            continue
-
-                        encoded = self._take_screenshot(sct, self.screens, screen)
-
-                        header = struct.pack("!B", PACKET_SCREENSHOT)
-                        data = encoded.tobytes()
-                        packet = header + data
-
-                        for addr in addr_list:
-                            if not self.network_manager.send_with_length_addr(conn, packet, addr):
-                                breaking_var = True
-                                break
-
-                        if breaking_var: break
-                    if breaking_var: break
-
-        except Exception:
-            pass
-        finally:
-            if status_callback:
-                status_callback(f"Screen streaming ended: {client_addr[0]}")
-            try:
-                conn.close()
-            except:
-                pass
 
     def start_client(self, sock, remote_window=None, status_callback=None):
         """Receive and display screen from host"""
@@ -434,8 +395,51 @@ class ScreenManager:
     def _screen_init(self):
         with mss.mss() as sct:
             self.screens = sct.monitors
-            del self.screens[0]  # Delete combination of all screens because it´s not needed
+            del self.screens[0]  # Delete combination of all screens because itÂ´s not needed
             self.screen_to_addr = {k: [] for k in range(len(self.screens))}
+
+    def _screen_loop(self, status_callback=None):
+        try:
+            self.started_loop = True
+            with mss.mss() as sct:
+                last_frame_time = time.time()
+
+                while self.running:
+                    current_time = time.time()
+                    elapsed = current_time - last_frame_time
+
+                    if elapsed < self.frame_time:
+                        time.sleep(self.frame_time - elapsed)
+                        continue
+
+                    last_frame_time = current_time
+
+                    for screen, clients in self.screen_to_addr.items():
+                        if len(clients) <= 0:
+                            continue
+
+                        encoded = self._take_screenshot(sct, self.screens, screen)
+
+                        header = struct.pack("!B", PACKET_SCREENSHOT)
+                        data = encoded.tobytes()
+                        packet = header + data
+
+                        for client in clients:
+                            conn, addr = client
+                            try:
+                                self.network_manager.send_with_length_addr(conn, packet, addr)
+                            except Exception:  # Used if connection is disconnected
+                                try:
+                                    AuthenticationManager._remove_from_addr_list(self, addr[0])
+                                    conn.close()
+                                except Exception:  # Used if connection is already deleted
+                                    pass
+        except Exception as e:
+            pass
+        finally:
+            if status_callback:
+                status_callback(f"Screen streaming ended: {addr[0]}")
+
 
     def _listen_for_screen_commands(self, conn, addr):
         """Listen for screen change commands from client"""
@@ -448,12 +452,10 @@ class ScreenManager:
                 command = json.loads(cmd_data.decode())
                 if command.get('type') == 'change_screen':
 
-                    for key, addr_list in list(self.screen_to_addr.items()):
-                        if addr in addr_list:
-                            addr_list.remove(addr)
+                    AuthenticationManager._remove_from_addr_list(self, addr)
 
                     screen = command.get('screen', str)
-                    self.screen_to_addr[screen].append(addr)
+                    self.screen_to_addr[screen].append((conn, addr))
             except (json.JSONDecodeError, Exception):
                 continue
 
@@ -968,7 +970,7 @@ class RemoteDesktopApp:
             while True:
                 message = self.status_queue.get_nowait()
                 self.status_text.config(state=tk.NORMAL)
-                self.status_text.insert(tk.END, f"â€¢ {message}\n")
+                self.status_text.insert(tk.END, f"Ã¢â‚¬Â¢ {message}\n")
                 self.status_text.see(tk.END)
                 self.status_text.config(state=tk.DISABLED)
         except queue.Empty:
