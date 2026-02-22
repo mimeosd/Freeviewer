@@ -144,7 +144,7 @@ class AuthenticationManager:
         with self.client_lock:
             if 0 < len(screen_manager.screen_to_addr):
                 # If windows is closed with x remove_client doesnÂ´t get called so we have to double-check
-                self._remove_from_addr_list(screen_manager, client_addr)
+                self._remove_from_addr_list(screen_manager, client_addr, conn)
                 first_key = next(iter(screen_manager.screen_to_addr))  # Get first screen of the host
                 screen_manager.screen_to_addr[first_key].append((conn, client_addr))
 
@@ -158,18 +158,18 @@ class AuthenticationManager:
             self.connected_clients.add(client_addr)
             return len(self.connected_clients)
 
-    def remove_client(self, client_addr, screen_manager):
+    def remove_client(self, client_addr, screen_manager, conn):
         """Remove disconnected client"""
         with self.client_lock:
             if 0 < len(screen_manager.screen_to_addr):
-                self._remove_from_addr_list(screen_manager, client_addr)
+                self._remove_from_addr_list(screen_manager, client_addr, conn)
             self.connected_clients.discard(client_addr)
             return len(self.connected_clients)
 
     @staticmethod
-    def _remove_from_addr_list(screen_manager, client_addr):
+    def _remove_from_addr_list(screen_manager, client_addr, conn):
         for clients in screen_manager.screen_to_addr.values():
-            clients[:] = [client for client in clients if client[1][0] != client_addr[0]]
+            clients[:] = [client for client in clients if not (client[0] == client_addr[0] and client[1] == client_addr)]
 
     def get_client_count(self):
         """Get current client count"""
@@ -424,13 +424,13 @@ class ScreenManager:
                         data = encoded.tobytes()
                         packet = header + data
 
-                        for client in clients:
+                        for client in clients[:]:
                             conn, addr = client
                             try:
                                 self.network_manager.send_with_length_addr(conn, packet, addr)
                             except Exception:  # Used if connection is disconnected
                                 try:
-                                    AuthenticationManager._remove_from_addr_list(self, addr[0])
+                                    AuthenticationManager._remove_from_addr_list(self, addr, conn)
                                     conn.close()
                                 except Exception:  # Used if connection is already deleted
                                     pass
@@ -452,7 +452,7 @@ class ScreenManager:
                 command = json.loads(cmd_data.decode())
                 if command.get('type') == 'change_screen':
 
-                    AuthenticationManager._remove_from_addr_list(self, addr)
+                    AuthenticationManager._remove_from_addr_list(self, addr, conn)
 
                     screen = command.get('screen', str)
                     self.screen_to_addr[screen].append((conn, addr))
@@ -1210,10 +1210,7 @@ class RemoteDesktopApp:
                 self.auth_manager.add_client(addr, conn, self.screen_manager)
 
                 # Handle screen sharing in separate thread
-                self.network_manager.executor.submit(
-                    self.screen_manager.start_host,
-                    conn, addr, self.add_status
-                )
+                self.screen_manager.start_host(conn, addr, self.add_status)
 
             except Exception:
                 break
