@@ -17,7 +17,6 @@ from file_transfer import FileTransferManager, FileTransferWindow
 from p2p_connector import P2PConnector
 
 
-
 try:
     import pynput
     from pynput.mouse import Button
@@ -50,6 +49,7 @@ class NetworkManager:
 
     def __init__(self):
         self.executor = ThreadPoolExecutor(max_workers=10)
+        self.command_executor = ThreadPoolExecutor(max_workers=MAX_CLIENTS)  # Used for listening for screen switch commands
 
     @staticmethod
     def create_server_socket(port):
@@ -332,7 +332,7 @@ class ScreenManager:
             status_callback(f"Screen streaming to: {client_addr[0]}")
 
         # Start listener thread for screen change commands from client
-        self.network_manager.executor.submit(self._listen_for_screen_commands, conn, client_addr)
+        self.network_manager.command_executor.submit(self._listen_for_screen_commands, conn, client_addr)
 
         if not self.started_loop:
             self.network_manager.executor.submit(self._screen_loop, status_callback)
