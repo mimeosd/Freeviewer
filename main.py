@@ -169,7 +169,7 @@ class AuthenticationManager:
     @staticmethod
     def _remove_from_addr_list(screen_manager, client_addr, conn):
         for clients in screen_manager.screen_to_addr.values():
-            clients[:] = [client for client in clients if not (client[0] == client_addr[0] and client[1] == client_addr)]
+            clients[:] = [client for client in clients if not (client[0] == conn and client[1] == client_addr)]
 
     def get_client_count(self):
         """Get current client count"""
